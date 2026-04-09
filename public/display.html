@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="mobile-web-app-capable" content="yes">
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+    <link rel="manifest" href="/site.webmanifest">
+    <link rel="shortcut icon" href="/favicon.ico">
+    <title>Timer Display</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #000000;
+            color: #fff;
+            height: 100vh;
+            height: 100dvh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .timer-container {
+            text-align: center;
+        }
+
+        .timer-display {
+            font-size: 400px;
+            font-weight: bold;
+            font-family: 'Arial', sans-serif;
+            color: #ffffff;
+            text-shadow: 4px 4px 8px rgba(0, 0, 0, 0.5);
+            letter-spacing: 10px;
+            line-height: 1;
+        }
+
+        .timer-display.warning {
+            color: #ff0000;
+        }
+
+        .status-indicator {
+            font-size: 40px;
+            margin-top: 20px;
+            color: #ffffff;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        /* Tablet responsive */
+        @media (max-width: 768px) {
+            .timer-display {
+                font-size: 250px;
+                letter-spacing: 6px;
+            }
+
+            .status-indicator {
+                font-size: 30px;
+            }
+        }
+
+        /* Mobile responsive */
+        @media (max-width: 480px) {
+            .timer-display {
+                font-size: 150px;
+                letter-spacing: 4px;
+            }
+
+            .status-indicator {
+                font-size: 24px;
+                margin-top: 15px;
+            }
+        }
+
+        /* Small mobile */
+        @media (max-width: 360px) {
+            .timer-display {
+                font-size: 120px;
+                letter-spacing: 3px;
+            }
+
+            .status-indicator {
+                font-size: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <audio id="timerSound" src="/end.mp3" preload="auto"></audio>
+    <audio id="fiveSecSound" src="/5sec.mp3" preload="auto"></audio>
+    
+    <div class="timer-container">
+        <div class="timer-display" id="timer">00:00</div>
+        <div class="status-indicator" id="status">STOPPED</div>
+    </div>
+
+    <script>
+        const ws = new WebSocket('ws://' + window.location.host);
+        const timerSound = document.getElementById('timerSound');
+        const fiveSecSound = document.getElementById('fiveSecSound');
+        
+        let timerState = {
+            isRunning: false,
+            minutes: 0,
+            seconds: 0
+        };
+        
+        let wasRunning = false;
+        let hasPlayedFiveSec = false;
+        let audioUnlocked = false;
+
+        // Unlock audio on first user interaction
+        document.addEventListener('click', () => {
+            if (!audioUnlocked) {
+                timerSound.play().then(() => {
+                    timerSound.pause();
+                    timerSound.currentTime = 0;
+                }).catch(() => {});
+                fiveSecSound.play().then(() => {
+                    fiveSecSound.pause();
+                    fiveSecSound.currentTime = 0;
+                }).catch(() => {});
+                audioUnlocked = true;
+            }
+        }, { once: true });
+
+        ws.onopen = () => {
+            console.log('Connected to server');
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            
+            if (data.type === 'timerState' || data.type === 'timerUpdate') {
+                timerState = data.state;
+                updateTimerDisplay();
+            }
+        };
+
+        ws.onclose = () => {
+            console.log('Disconnected from server');
+        };
+
+        ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+        };
+
+        function updateTimerDisplay() {
+            const minutes = String(timerState.minutes).padStart(2, '0');
+            const seconds = String(timerState.seconds).padStart(2, '0');
+            const timerElement = document.getElementById('timer');
+            const statusElement = document.getElementById('status');
+            const totalSeconds = timerState.minutes * 60 + timerState.seconds;
+            
+            timerElement.textContent = `${minutes}:${seconds}`;
+            
+            // Reset five-second warning flag when timer is above 5 seconds or not running
+            if (totalSeconds > 5 || !timerState.isRunning) {
+                hasPlayedFiveSec = false;
+            }
+            
+            // Make text red when 5 seconds or less
+            if (totalSeconds <= 5 && totalSeconds > 0) {
+                timerElement.classList.add('warning');
+                
+                // Play 5-second warning sound when timer reaches exactly 5 seconds
+                if (totalSeconds === 5 && timerState.isRunning && !hasPlayedFiveSec) {
+                    fiveSecSound.currentTime = 0;
+                    fiveSecSound.play().catch(err => console.error('Audio play error:', err));
+                    hasPlayedFiveSec = true;
+                }
+            } else {
+                timerElement.classList.remove('warning');
+            }
+            
+            if (timerState.isRunning) {
+                statusElement.textContent = 'RUNNING';
+            } else {
+                statusElement.textContent = 'STOPPED';
+            }
+            
+            // Play sound when timer stops at 00:00
+            if (wasRunning && !timerState.isRunning && timerState.minutes === 0 && timerState.seconds === 0) {
+                timerSound.currentTime = 0;
+                timerSound.play().catch(err => console.error('Audio play error:', err));
+                setTimeout(() => {
+                    timerSound.pause();
+                }, 1500);
+            }
+            
+            wasRunning = timerState.isRunning;
+        }
+
+        updateTimerDisplay();
+    </script>
+</body>
+</html>
